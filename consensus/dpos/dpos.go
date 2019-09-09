@@ -33,7 +33,7 @@ const (
 
 	blockInterval       = int64(5)
 	epochInterval       = int64(60)
-	maxValidatorSize    = 3
+	maxValidatorSize    = 7
 	safeSize            = maxValidatorSize*2/3 + 1
 	consensusSize       = maxValidatorSize*2/3 + 1
 	rewardMultiple      = int64(100000000)

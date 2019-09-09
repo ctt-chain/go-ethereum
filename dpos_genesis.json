@@ -1,0 +1,28 @@
+{
+  "config": {
+    "chainId": 10,
+    "eip155Block": 0,
+    "eip158Block": 0,
+    "byzantiumBlock": 0,
+    "dpos": {
+      "validators": [
+        "0x3dd7513262ce8f45ef1936355ae9692e3621749f",
+        "0x09bfb7f3be97010bcb7db5d4a1da951be9116099",
+        "0x28a8bcbb6a3fc4280cd069c5a6d66c647d959679",
+        "0x3d9f35be4583474f4a42cd3bdda88bada368f733",
+        "0xd22b5e568d813ac08de3d4c861fc601ccf8d9e83",
+        "0xe382e95ef03964c8060ca3e7bca0b2ddddde4ba8",
+        "0xec265f3e7b5326017c56eefc71477a3b7eb20005"
+      ]
+    }
+  },
+  "nonce": "0x0000000000000042",
+  "difficulty": "0x020000",
+  "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "coinbase": "0x0000000000000000000000000000000000000000",
+  "timestamp": "0x00",
+  "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "extraData": "0x11bbe8db4e347b4e8c937c1c8370e4b5ed33adb3db69cbdb7a38e1e50b1b82fa",
+  "gasLimit": "0x500000",
+  "alloc": {}
+}
