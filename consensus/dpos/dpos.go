@@ -31,18 +31,17 @@ const (
 	extraSeal          = 65   // Fixed number of extra-data suffix bytes reserved for signer seal
 	inmemorySignatures = 4096 // Number of recent block signatures to keep in memory
 
-	blockInterval    = int64(10)
-	epochInterval    = int64(86400)
-	maxValidatorSize = 3
-	safeSize         = maxValidatorSize*2/3 + 1
-	consensusSize    = maxValidatorSize*2/3 + 1
-	rewardMultiple	 = int64(100000000)
-	coinbaseIncome	 = int64(3)
-	miningMachineIncome	 = int64(9997)
+	blockInterval       = int64(5)
+	epochInterval       = int64(60)
+	maxValidatorSize    = 3
+	safeSize            = maxValidatorSize*2/3 + 1
+	consensusSize       = maxValidatorSize*2/3 + 1
+	rewardMultiple      = int64(100000000)
+	coinbaseIncome      = int64(3)
+	miningMachineIncome = int64(9997)
 )
 
 var (
-
 	big0  = big.NewInt(0)
 	big8  = big.NewInt(8)
 	big32 = big.NewInt(32)
@@ -50,25 +49,27 @@ var (
 	frontierBlockReward  *big.Int = big.NewInt(5e+18) // Block reward in wei for successfully mining a block
 	byzantiumBlockReward *big.Int = big.NewInt(3e+18) // Block reward in wei for successfully mining a block upward from Byzantium
 
-	timeOfFirstBlock = int64(0)
+	SystemRewardAddress = common.BytesToAddress([]byte{155, 35, 2, 253, 159, 234, 73, 26, 247, 121, 46, 247, 83, 109, 76, 83, 241, 226, 65, 146})
+
+	timeOfFirstBlock   = int64(0)
 	confirmedBlockHead = []byte("confirmed-block-head")
 
 	totalReward = big.NewInt(0) //Initialization bonus amount
-    totalBlock = big.NewInt(525600)
+	totalBlock  = big.NewInt(525600)
 
-	currentVoteMap map[common.Address]*big.Int
-	)
-
+	currentVoteMap   map[common.Address]*big.Int
+	currentRewardMap map[common.Address]*big.Int
+)
 
 var stages = map[string]string{
-	"1":"1757990867579908675799",
-	"87600":"1464992374429224000000",
-	"175200":"1171993915525114000000",
-	"262800":"878995433789954300000",
-	"350400":"585996940639269400000",
-	"438000":"292998504566210000000",
+	"1":      "1757990867579908675799",
+	"87600":  "1464992374429224000000",
+	"175200": "1171993915525114000000",
+	"262800": "878995433789954300000",
+	"350400": "585996940639269400000",
+	"438000": "292998504566210000000",
+	"525600": "0",
 }
-
 
 var (
 	// errUnknownBlock is returned when the list of signers is requested for a block
@@ -380,81 +381,95 @@ func AccumulateRewards(config *params.ChainConfig, state *state.StateDB, header 
 	}
 	// Accumulate the rewards for the miner and any included uncles
 	reward := new(big.Int).Set(blockReward)
-	state.AddBalance(header.Coinbase, reward)
+	Transfer(state, header.Coinbase, reward)
 }
 
 //Diminishing reward
-func AccumulatedjRewards( state *state.StateDB, header *types.Header,epochContext *EpochContext) (error) {
+func AccumulatedjRewards(state *state.StateDB, header *types.Header, epochContext *EpochContext) (error) {
 	//Get current block rewards
-	for k := range stages {
-		number,flag := new(big.Int).SetString(k,10)
-		if !flag{
-			return  fmt.Errorf("format error")
-		}
-		if header.Number.Cmp(number) >= 0{
-			rwd,success := new(big.Int).SetString(stages[k],10)
-			if !success{
-				return  fmt.Errorf("format error")
-			}
-			totalReward = rwd
+	for currentAddr := range currentRewardMap {
+
+		if header.Coinbase == currentAddr {
+			totalReward = currentRewardMap[currentAddr]
 		}
 	}
-	candidate:= header.Coinbase.Bytes()
+
+	candidate := header.Coinbase.Bytes()
 	//Get the total number of votes for this candidate
 	vote := big.NewInt(0)
 	for candidateAddr, cnt := range currentVoteMap {
-		if candidateAddr == common.BytesToAddress(candidate){
-			vote = new(big.Int).Add(vote,cnt)
+		if candidateAddr == common.BytesToAddress(candidate) {
+			vote = new(big.Int).Add(vote, cnt)
 		}
 	}
-	if vote.Cmp(new(big.Int).SetInt64(rewardMultiple)) >= 0	{
-		return  ErrVotesExceedsLimit
+	if vote.Int64() != 0 {
+		if vote.Cmp(new(big.Int).SetInt64(rewardMultiple)) >= 0 {
+			return ErrVotesExceedsLimit
+		}
+		delegateTrie := epochContext.GetDelegate()
+		iter := trie.NewIterator(delegateTrie.PrefixIterator(candidate))
+	OuterLoop:
+		for iter.Next() {
+
+			//user 9997/10000
+			delegator := iter.Value
+			key := append(candidate, delegator...)
+			delegateAddr := delegateTrie.Get(key)
+			level := state.GetMinerLevel(common.BytesToAddress(delegateAddr))
+			if level == 0 {
+				continue OuterLoop
+			}
+			//level up to 100000000
+			l := new(big.Int).Mul(new(big.Int).SetUint64(level), new(big.Int).SetInt64(rewardMultiple))
+			//score = v
+			v := new(big.Int).Div(l, vote)
+			//totalReward * 0.9997
+			a := new(big.Int).Mul(totalReward, new(big.Int).SetInt64(miningMachineIncome))
+			//level / store * (totalReward * 0.9997)
+			r := new(big.Int).Mul(v, a)
+			//Narrow the result
+			c := new(big.Int).Div(r, new(big.Int).SetInt64(10000))
+			q := new(big.Int).Div(c, new(big.Int).SetInt64(rewardMultiple))
+			//Distribution of income
+			Transfer(state, common.BytesToAddress(delegateAddr), q)
+		}
+		// miner 3/10000
+		p := new(big.Int).Mul(totalReward, new(big.Int).SetInt64(coinbaseIncome))
+		reward := new(big.Int).Div(p, new(big.Int).SetInt64(10000))
+		//No rewards greater than 525,600
+		if totalBlock.Cmp(header.Number) >= 0 {
+			Transfer(state, header.Coinbase, reward)
+		}
+	} else {
+		Transfer(state, header.Coinbase, new(big.Int).SetInt64(0))
 	}
-	delegateTrie := epochContext.GetDelegate()
-	iter := trie.NewIterator(delegateTrie.PrefixIterator(candidate))
-	for iter.Next() {
-		//user 9997/10000
-		delegator := iter.Value
-		key := append(candidate, delegator...)
-		delegateAddr := delegateTrie.Get(key)
-		level := state.GetMinerLevel(common.BytesToAddress(delegateAddr))
-		//level up to 100000000
-		l := new(big.Int).Mul(new(big.Int).SetUint64(level),new(big.Int).SetInt64(rewardMultiple))
-		//score = v
-		v := new(big.Int).Div(l,vote)
-		//totalReward * 0.9997
-		a := new(big.Int).Mul(totalReward,new(big.Int).SetInt64(miningMachineIncome))
-		//level / store * (totalReward * 0.9997)
-		r := new(big.Int).Mul(v,a)
-		//Narrow the result
-		c := new(big.Int).Div(r,new(big.Int).SetInt64(10000))
-		q := new(big.Int).Div(c,new(big.Int).SetInt64(rewardMultiple))
-		//Distribution of income
-		state.AddBalance(common.BytesToAddress(delegateAddr), q)
-	}
-	// miner 3/10000
-	p := new(big.Int).Mul(totalReward ,new(big.Int).SetInt64(coinbaseIncome))
-	reward := new(big.Int).Div(p ,new(big.Int).SetInt64(10000))
-	//No rewards greater than 525,600
-	if totalBlock.Cmp(header.Number) >= 0{
-		state.AddBalance(header.Coinbase, reward)
-	}
+
 	return nil
+}
+
+func Transfer(state *state.StateDB, addr common.Address, reward *big.Int) {
+	state.SubBalance(SystemRewardAddress, reward)
+	state.AddBalance(addr, reward)
 }
 
 func (d *Dpos) Finalize(chain consensus.ChainReader, header *types.Header, state *state.StateDB, txs []*types.Transaction,
 	uncles []*types.Header, receipts []*types.Receipt, dposContext *types.DposContext) (*types.Block, error) {
 
 	epochContext := &EpochContext{
+		statedb:     state,
 		DposContext: dposContext,
 		TimeStamp:   header.Time.Int64(),
 	}
-
+	/*if header.Number.Cmp(new(big.Int).SetInt64(1)) == 0{
+		AccumulateRewards(chain.Config(), state, header, uncles)
+	}else{*/
 	// Accumulate block rewards and commit the final state root
 	error := AccumulatedjRewards(state, header, epochContext)
-	if error != nil{
-		return nil,error
+	if error != nil {
+		return nil, error
 	}
+	//}
+
 	header.Root = state.IntermediateRoot(chain.Config().IsEIP158(header.Number))
 	parent := chain.GetHeaderByHash(header.ParentHash)
 	if timeOfFirstBlock == 0 {
